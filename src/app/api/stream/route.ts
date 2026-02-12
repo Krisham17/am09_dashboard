@@ -1,6 +1,8 @@
 import { initState, stepState, kpisFrom } from "../../../lib/mock";
 
 export const runtime = "nodejs";
+console.log("BRIDGE_URL =", process.env.BRIDGE_URL);
+
 
 export async function GET(req: Request) {
   const encoder = new TextEncoder();
