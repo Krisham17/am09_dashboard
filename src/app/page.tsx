@@ -7,6 +7,9 @@ import {
 import type { EdgeState, IntersectionState } from "../lib/mock";
 import { EDGES, SCENARIO_NODES } from "../lib/mock";
 
+// ✅ ADDED: real SUMO network map renderer (reads /public/network/network.json)
+import NetworkMap from "@/components/NetworkMap";
+
 function round(x: number, d = 2) {
   const p = Math.pow(10, d);
   return Math.round(x * p) / p;
@@ -34,10 +37,13 @@ export default function Page() {
   const [ints, setInts] = React.useState<IntersectionState[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
   const [selected, setSelected] = React.useState<string>("A");
+
   const sel = React.useMemo(() => ints.find((i) => i.id === selected), [ints, selected]);
   const [kpis, setKpis] = React.useState({ avgDelay: 0, totalQueue: 0, throughputVPM: 0 });
   const [paused, setPaused] = React.useState(false);
   const [chartMode, setChartMode] = React.useState<"trend" | "congestion">("trend");
+  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | null>(null);
+
 
   // Week 8–9: settings + results strip + run notes
   const [scenario, setScenario] = React.useState("Grid 3×2");
@@ -56,6 +62,14 @@ export default function Page() {
     () => SCENARIO_NODES[scenario] ?? SCENARIO_NODES["Grid 3×2"],
     [scenario]
   );
+
+  // ✅ ADDED: Decide when to use the real SUMO network map
+  // Your SUMO bridge edges do NOT include from/to; your mock edges do.
+  const useRealNetworkMap = React.useMemo(() => {
+    const anyEdge: any = edges?.[0];
+    if (!anyEdge) return false;
+    return (anyEdge.from === undefined || anyEdge.to === undefined);
+  }, [edges]);
 
   // refs for a low-latency scheduler that coalesces updates
   const latestRef = React.useRef<any | null>(null);
@@ -220,9 +234,10 @@ export default function Page() {
         <KpiCard title="Throughput" value={Math.round(kpis.throughputVPM).toString()} label="veh/min" tone="emerald" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         {/* Map Visualization */}
-        <div className={`col-span-1 lg:col-span-2 card ${cardPad} relative overflow-hidden flex flex-col h-[500px] lg:h-auto`}>
+        <div className={`card ${cardPad} relative overflow-hidden flex flex-col h-[700px] lg:h-[800px]`}>
+
           <div className="flex justify-between items-center mb-4">
              <h2 className="font-semibold text-neutral-800">Live Junction Map</h2>
              <span className="text-xs text-neutral-400 bg-neutral-100 px-2 py-1 rounded">
@@ -231,14 +246,25 @@ export default function Page() {
           </div>
           
           <div className="flex-1 bg-neutral-50 rounded-xl border border-neutral-100 relative shadow-inner overflow-hidden">
-             <svg width="100%" height="100%" viewBox="0 0 600 300" className="absolute inset-0 w-full h-full pointer-events-none select-none">
+            {/* ✅ ADDED: Switch renderer only when using real SUMO edges */}
+            {useRealNetworkMap ? (
+              <div className="absolute inset-0 w-full h-full">
+                <NetworkMap
+                  viewMode={viewMode}
+                  onSelectEdge={(id) => setSelectedEdgeId(id)}
+                />
+
+
+              </div>
+            ) : (
+              <svg width="100%" height="100%" viewBox="0 0 600 300" className="absolute inset-0 w-full h-full pointer-events-none select-none">
                 {/* Edges */}
                 {edges.map((e) => {
-                  const n1 = nodes.find(n => n.id === e.from);
-                  const n2 = nodes.find(n => n.id === e.to);
+                  const n1 = nodes.find(n => n.id === (e as any).from);
+                  const n2 = nodes.find(n => n.id === (e as any).to);
                   if (!n1 || !n2) return null;
                   return (
-                    <g key={e.id}>
+                    <g key={(e as any).id}>
                       <line x1={n1.x} y1={n1.y} x2={n2.x} y2={n2.y} stroke="#e5e5e5" strokeWidth="8" strokeLinecap="round" />
                       <line 
                         x1={n1.x} y1={n1.y} x2={n2.x} y2={n2.y} 
@@ -254,7 +280,7 @@ export default function Page() {
                   const iState = ints.find(i => i.id === n.id);
                   const isSel = selected === n.id;
                   return (
-                    <g key={n.id} onClick={() => setSelected(n.id)} className="pointer-events-auto cursor-pointer transition-transform hover:scale-110">
+                    <g key={n.id} onClick={() => { setSelected(n.id); setSelectedEdgeId(null); }} className="pointer-events-auto cursor-pointer transition-transform hover:scale-110">
                       <circle cx={n.x} cy={n.y} r={18} fill="white" className="drop-shadow-sm" />
                       <circle cx={n.x} cy={n.y} r={16} fill={isSel ? "#2563eb" : "white"} stroke={isSel ? "#1d4ed8" : "#d4d4d4"} strokeWidth={3} />
                       <text x={n.x} y={n.y + 4} textAnchor="middle" fill={isSel ? "white" : "#404040"} fontSize="11" fontWeight="bold">
@@ -268,7 +294,8 @@ export default function Page() {
                     </g>
                   );
                 })}
-             </svg>
+              </svg>
+            )}
           </div>
 
           {/* New Footer Legend (Moved outside map area) */}
@@ -394,6 +421,13 @@ export default function Page() {
                </div>
                {sel && <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded font-mono border border-blue-100">{sel.phase}</span>}
              </div>
+             {useRealNetworkMap && selectedEdgeId && (
+                <div className="mb-3 p-2.5 rounded-lg bg-neutral-50 border border-neutral-100">
+                  <div className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Selected Edge</div>
+                  <div className="font-mono text-sm text-neutral-800 mt-1">{selectedEdgeId}</div>
+                </div>
+             )}
+
              
              {sel ? (
                <div className="space-y-3">
@@ -404,12 +438,12 @@ export default function Page() {
                  <div className="h-px bg-neutral-100 my-2" />
                  <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-2">Inbound Links</div>
                  <div className="space-y-2">
-                   {edges.filter(e => e.to === sel.id).map(e => (
-                     <div key={e.id} className="bg-neutral-50 rounded-lg p-2.5 border border-neutral-100">
+                   {edges.filter(e => (e as any).to === sel.id).map(e => (
+                     <div key={(e as any).id} className="bg-neutral-50 rounded-lg p-2.5 border border-neutral-100">
                        <div className="flex justify-between items-center mb-1">
-                         <span className="font-medium text-neutral-700 text-sm">{e.from} → {e.to}</span>
+                         <span className="font-medium text-neutral-700 text-sm">{(e as any).from} → {(e as any).to}</span>
                          <span className="text-xs bg-white border border-neutral-200 px-1.5 py-0.5 rounded text-neutral-500 shadow-sm">
-                           {round(e.speed_kmh, 0)} km/h
+                           {round((e as any).speed_kmh, 0)} km/h
                          </span>
                        </div>
                        <div className="grid grid-cols-2 gap-2 text-xs mt-1.5">
@@ -417,12 +451,12 @@ export default function Page() {
                             <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: getEdgeColor(viewMode, e)}} />
                             <span className="text-neutral-500">{viewMode === "Queue View" ? "Queue" : "Metric"}:</span>
                             <span className="font-bold text-neutral-700">
-                                {round(viewMode === "Queue View" ? e.queue : viewMode === "Delay View" ? e.delay_s : e.speed_kmh, 1)}
+                                {round(viewMode === "Queue View" ? (e as any).queue : viewMode === "Delay View" ? (e as any).delay_s : (e as any).speed_kmh, 1)}
                             </span>
                           </div>
                           <div className="flex justify-end">
                             <span className="text-neutral-500 font-mono">
-                                {Math.round(e.flow_vph)} vph
+                                {Math.round((e as any).flow_vph)} vph
                             </span>
                           </div>
                        </div>
@@ -513,19 +547,19 @@ function KpiCard({ title, value, label, tone }: { title: string; value: string; 
 
 function getEdgeColor(mode: string, e: EdgeState) {
   if (mode === "Speed View") {
-    if (e.speed_kmh > 45) return "#10b981"; // emerald-500
-    if (e.speed_kmh > 25) return "#f59e0b"; // amber-500
+    if ((e as any).speed_kmh > 45) return "#10b981"; // emerald-500
+    if ((e as any).speed_kmh > 25) return "#f59e0b"; // amber-500
     return "#f43f5e"; // rose-500
   }
   
   if (mode === "Delay View") {
-    if (e.delay_s < 10) return "#22d3ee"; // cyan-400
-    if (e.delay_s < 30) return "#8b5cf6"; // violet-500
+    if ((e as any).delay_s < 10) return "#22d3ee"; // cyan-400
+    if ((e as any).delay_s < 30) return "#8b5cf6"; // violet-500
     return "#4c1d95"; // violet-900
   }
 
   // Default: Queue View
-  if (e.queue < 3) return "#10b981"; // emerald-500
-  if (e.queue < 7) return "#f59e0b"; // amber-500
+  if ((e as any).queue < 3) return "#10b981"; // emerald-500
+  if ((e as any).queue < 7) return "#f59e0b"; // amber-500
   return "#f43f5e"; // rose-500
 }
