@@ -34,7 +34,6 @@ export default function Page() {
   const [ints, setInts] = React.useState<IntersectionState[]>([]);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
   const [selected, setSelected] = React.useState<string>("A");
-  const sel = React.useMemo(() => ints.find((i) => i.id === selected), [ints, selected]);
   const [kpis, setKpis] = React.useState({ avgDelay: 0, totalQueue: 0, throughputVPM: 0 });
   const [paused, setPaused] = React.useState(false);
   const [chartMode, setChartMode] = React.useState<"trend" | "congestion">("trend");
@@ -56,6 +55,16 @@ export default function Page() {
     () => SCENARIO_NODES[scenario] ?? SCENARIO_NODES["Grid 3×2"],
     [scenario]
   );
+
+  // O(1) lookup maps – rebuilt only when their source arrays change
+  const nodeMap = React.useMemo(() => new Map(nodes.map(n => [n.id, n])), [nodes]);
+  const intsMap = React.useMemo(() => new Map(ints.map(i => [i.id, i])), [ints]);
+
+  // O(1) selected intersection lookup
+  const sel = React.useMemo(() => intsMap.get(selected), [intsMap, selected]);
+
+  // stable click handler – avoids new function reference on every render
+  const handleNodeSelect = React.useCallback((id: string) => setSelected(id), []);
 
   // refs for a low-latency scheduler that coalesces updates
   const latestRef = React.useRef<any | null>(null);
@@ -83,9 +92,9 @@ export default function Page() {
           totalQueue: msg.kpis.totalQueue,
           throughput: msg.kpis.throughputVPM,
         };
-        const next = [...prev, pt];
-        if (next.length > SERIES_MAX) return next.slice(next.length - SERIES_MAX);
-        return next;
+        // Single allocation: slice off one old point then append new one
+        const base = prev.length >= SERIES_MAX ? prev.slice(1 - SERIES_MAX) : prev;
+        return [...base, pt];
       });
     });
   }, []);
@@ -230,12 +239,12 @@ export default function Page() {
              </span>
           </div>
           
-          <div className="flex-1 bg-neutral-50 rounded-xl border border-neutral-100 relative shadow-inner overflow-hidden">
+          <div className="flex-1 min-h-[360px] bg-neutral-50 rounded-xl border border-neutral-100 relative shadow-inner overflow-hidden">
              <svg width="100%" height="100%" viewBox="0 0 600 300" className="absolute inset-0 w-full h-full pointer-events-none select-none">
                 {/* Edges */}
                 {edges.map((e) => {
-                  const n1 = nodes.find(n => n.id === e.from);
-                  const n2 = nodes.find(n => n.id === e.to);
+                  const n1 = nodeMap.get(e.from);
+                  const n2 = nodeMap.get(e.to);
                   if (!n1 || !n2) return null;
                   return (
                     <g key={e.id}>
@@ -251,10 +260,10 @@ export default function Page() {
                 })}
                 {/* Nodes */}
                 {nodes.map((n) => {
-                  const iState = ints.find(i => i.id === n.id);
+                  const iState = intsMap.get(n.id);
                   const isSel = selected === n.id;
                   return (
-                    <g key={n.id} onClick={() => setSelected(n.id)} className="pointer-events-auto cursor-pointer transition-transform hover:scale-110">
+                    <g key={n.id} onClick={() => handleNodeSelect(n.id)} className="pointer-events-auto cursor-pointer transition-transform hover:scale-110">
                       <circle cx={n.x} cy={n.y} r={18} fill="white" className="drop-shadow-sm" />
                       <circle cx={n.x} cy={n.y} r={16} fill={isSel ? "#2563eb" : "white"} stroke={isSel ? "#1d4ed8" : "#d4d4d4"} strokeWidth={3} />
                       <text x={n.x} y={n.y + 4} textAnchor="middle" fill={isSel ? "white" : "#404040"} fontSize="11" fontWeight="bold">
@@ -477,8 +486,8 @@ export default function Page() {
                 </tr>
               </thead>
               <tbody>
-                {snapshots.map((s, i) => (
-                  <tr key={i} className="border-b last:border-0 hover:bg-neutral-50">
+                {snapshots.map((s) => (
+                  <tr key={s.ts} className="border-b last:border-0 hover:bg-neutral-50">
                     <td className="px-3 py-2 font-medium">{s.tag}</td>
                     <td className="px-3 py-2 text-neutral-500">{new Date(s.ts).toLocaleTimeString()}</td>
                     <td className="px-3 py-2 text-right">{round(s.kpis.avgDelay)}</td>
@@ -495,7 +504,7 @@ export default function Page() {
   );
 }
 
-function KpiCard({ title, value, label, tone }: { title: string; value: string; label: string; tone: Tone }) {
+const KpiCard = React.memo(function KpiCard({ title, value, label, tone }: { title: string; value: string; label: string; tone: Tone }) {
   const colors: Record<Tone, string> = {
     neutral: "text-neutral-600", emerald: "text-emerald-600", amber: "text-amber-600",
     rose: "text-rose-600", sky: "text-sky-600", indigo: "text-indigo-600", violet: "text-violet-600"
@@ -509,7 +518,7 @@ function KpiCard({ title, value, label, tone }: { title: string; value: string; 
       </div>
     </div>
   );
-}
+});
 
 function getEdgeColor(mode: string, e: EdgeState) {
   if (mode === "Speed View") {
