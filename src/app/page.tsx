@@ -5,7 +5,7 @@ import {
   BarChart, Bar, Legend, CartesianGrid, Cell
 } from "recharts";
 import type { EdgeState, IntersectionState } from "../lib/mock";
-import { EDGES, SCENARIO_NODES } from "../lib/mock";
+import { EDGES, SCENARIO_NODES, initState } from "../lib/mock";
 
 function round(x: number, d = 2) {
   const p = Math.pow(10, d);
@@ -29,9 +29,9 @@ const FRAME_MS = 1000 / APPLY_HZ;
 const SERIES_MAX = 60; // cap time-series length to bound memory/GC
 
 export default function Page() {
-  // live UI state
-  const [edges, setEdges] = React.useState<EdgeState[]>([]);
-  const [ints, setInts] = React.useState<IntersectionState[]>([]);
+  // live UI state – seeded with static mock so map renders before stream arrives
+  const [edges, setEdges] = React.useState<EdgeState[]>(() => initState().edges);
+  const [ints, setInts] = React.useState<IntersectionState[]>(() => initState().ints);
   const [series, setSeries] = React.useState<SeriesPoint[]>([]);
   const [selected, setSelected] = React.useState<string>("A");
   const [kpis, setKpis] = React.useState({ avgDelay: 0, totalQueue: 0, throughputVPM: 0 });
